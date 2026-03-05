@@ -10,4 +10,5 @@ pio
 .cache
 build_output
 firmware.map
-firmware.asm
+firmware.asm.DS_Store
+binaries/.DS_Store
