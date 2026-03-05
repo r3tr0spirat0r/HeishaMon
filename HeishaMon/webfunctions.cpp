@@ -15,6 +15,10 @@
 
 #define UPTIME_OVERFLOW 4294967295 // Uptime overflow value
 
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
+bool g_ethStarted = false;
+#endif
+
 static uint8_t ntpservers = 0;
 
 void log_message(char* string);
@@ -1045,26 +1049,27 @@ int handleRoot(struct webserver_t *client, float readpercentage, int mqttReconne
         itoa(getWifiQuality(), str, 10);
         webserver_send_content(client, (char *)str, strlen(str));
 #ifdef ESP32
-        webserver_send_content_P(client, webBodyRootStatusEthernet, strlen_P(webBodyRootStatusEthernet));
-        if (ETH.phyAddr() != 0) {        
-          if (ETH.connected()) {
-            if (ETH.hasIP()) {
-              webserver_send_content_P(client, PSTR("connected - IP: "), 16);
-              char ipaddress[30];
-              ETH.localIP().toString().toCharArray(ipaddress,30);
-              webserver_send_content(client, ipaddress, strlen(ipaddress));              
-              
-            } else {
-              webserver_send_content_P(client, PSTR("connected - no IP"), 17);
-            }
-          } 
-          else {
-            webserver_send_content_P(client, PSTR("not connected"), 13);
-          }
-        } else {
-          webserver_send_content_P(client, PSTR("not installed"), 13);
-        }
+  webserver_send_content_P(client, webBodyRootStatusEthernet, strlen_P(webBodyRootStatusEthernet));
+
+  #ifndef HEISHAMON_NO_ETH
+    if (!g_ethStarted) {
+      webserver_send_content_P(client, PSTR("not installed"), 13);
+    } else {
+      IPAddress ip = ETH.localIP();
+      if (ip == IPAddress(0,0,0,0)) {
+        webserver_send_content_P(client, PSTR("connected - no IP"), 17);
+      } else {
+        webserver_send_content_P(client, PSTR("connected - IP: "), 16);
+        char ipaddress[30];
+        ip.toString().toCharArray(ipaddress, 30);
+        webserver_send_content(client, ipaddress, strlen(ipaddress));
+      }
+    }
+  #else
+    webserver_send_content_P(client, PSTR("disabled"), 8);
+  #endif
 #endif
+
       } break;
     case 3: {
         webserver_send_content_P(client, webBodyRootStatusMemory, strlen_P(webBodyRootStatusMemory));
