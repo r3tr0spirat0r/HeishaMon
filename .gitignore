@@ -12,3 +12,4 @@ build_output
 firmware.map
 firmware.asm.DS_Store
 binaries/.DS_Store
+.DS_Store
