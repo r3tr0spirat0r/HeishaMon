@@ -1,5 +1,12 @@
 #define LWIP_INTERNAL
 
+// --- build switch: classic ESP32 (bez ETH/W5500) ---
+#define HEISHAMON_NO_ETH
+
+#ifndef WL_STOPPED
+  #define WL_STOPPED WL_DISCONNECTED
+#endif
+
 #if defined(ESP8266)
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -19,12 +26,18 @@
   #define PROXYTX 8
   #define ENABLEPIN 5
   #define ENABLEOTPIN 4
-  #define LEDPIN 42
+  //#define LEDPIN 42
+  #define LEDPIN 2
   #define BOOTPIN 0
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <Adafruit_NeoPixel.h>
 #endif
+
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
+static bool g_ethStarted = false;
+#endif
+
 
 
 #include <DNSServer.h>
@@ -160,27 +173,27 @@ bool firstConnectSinceBoot = true; //if this is true there is no first connectio
 struct timerqueue_t **timerqueue = NULL;
 int timerqueue_size = 0;
 
-#ifdef ESP32
-#define ETH_TYPE        ETH_PHY_W5500
-#define ETH_ADDR         1
-#define ETH_CS          10
-#define ETH_IRQ          15
-#define ETH_RST          14
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
 
-// SPI pins
-#define ETH_SPI_SCK     12
-#define ETH_SPI_MISO    13
-#define ETH_SPI_MOSI    11
+  #define ETH_TYPE ETH_PHY_W5500
+  #define ETH_ADDR 1
+  #define ETH_CS 10
+  #define ETH_IRQ 15
+  #define ETH_RST 14
 
-void setupETH() {
-  SPI.begin(ETH_SPI_SCK, ETH_SPI_MISO, ETH_SPI_MOSI);
-  if (ETH.begin(ETH_TYPE, ETH_ADDR, ETH_CS, ETH_IRQ, ETH_RST, SPI)) {
-    //sethostname on ESP32 after eth.begin (!! for wifi is most be before...!!)
-    ETH.setHostname(heishamonSettings.wifi_hostname);
-  } else {
-    loggingSerial.println("Could not start ethernet. No ethernet module installed?");
+  #define ETH_SPI_SCK 12
+  #define ETH_SPI_MISO 13
+  #define ETH_SPI_MOSI 11
+
+  void setupETH() {
+    SPI.begin(ETH_SPI_SCK, ETH_SPI_MISO, ETH_SPI_MOSI);
+    if (ETH.begin(ETH_TYPE, ETH_ADDR, ETH_CS, ETH_IRQ, ETH_RST, SPI)) {
+      ETH.setHostname(heishamonSettings.wifi_hostname);
+    } else {
+      loggingSerial.println("Could not start ethernet. No ethernet module installed?");
+    }
   }
-}
+
 #endif
 
 
@@ -282,11 +295,12 @@ void check_wifi() {
 #elif defined(ESP32)
 void check_wifi() {
   wl_status_t wifistatus = WiFi.status();
-  bool ethUp = ETH.hasIP();
+  //bool ethUp = ETH.hasIP();
   bool wifiUp = (wifistatus == WL_CONNECTED);
 
   /* ---------- Fast path: network is up ---------- */
-  if (wifiUp || ethUp) {
+  //if (wifiUp || ethUp) {
+  if (wifiUp) {
 
     neoPixelState = pixels.Color(0, 0, 0); // normal operation
     lastWifiRetryTimer = millis();
@@ -479,15 +493,9 @@ void mqtt_reconnect()
       sprintf(topic, "%s/%s", heishamonSettings.mqtt_topic_base, mqtt_willtopic);
       mqtt_client.publish(topic, "Online");
       sprintf(topic, "%s/%s", heishamonSettings.mqtt_topic_base, mqtt_iptopic);
-#ifdef ESP8266
+
       mqtt_client.publish(topic, WiFi.localIP().toString().c_str(), true);
-#else
-      if (ETH.hasIP()) {
-        mqtt_client.publish(topic, ETH.localIP().toString().c_str(), true);
-      } else {
-        mqtt_client.publish(topic, WiFi.localIP().toString().c_str(), true);
-      }
-#endif
+
 
       if (heishamonSettings.use_s0) { // connect to s0 topic to retrieve older watttotal from mqtt
         sprintf_P(mqtt_topic, PSTR("%s/%s/WatthourTotal/1"), heishamonSettings.mqtt_topic_base, mqtt_topic_s0);
@@ -1552,7 +1560,7 @@ void switchSerial() {
   heatpumpSerial.flush();
   proxySerial.flush();
   proxySerial.end();
-  proxySerial.begin(9600, SERIAL_8E1,PROXYRX,PROXYTX);
+  //proxySerial.begin(9600, SERIAL_8E1,PROXYRX,PROXYTX);
   proxySerial.flush();  
 #endif
 
@@ -1787,7 +1795,7 @@ void setup() {
   setupWifi(&heishamonSettings);
   lastWifiRetryTimer = millis();
 
-#if defined(ESP32)
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
   loggingSerial.println(F("Setup ethernet module..."));
   setupETH();
 #endif
@@ -1983,7 +1991,11 @@ void loop() {
   #ifdef ESP8266
     if ( WiFi.isConnected() && (!mqtt_client.connected()) )
   #else
-    if ( (WiFi.isConnected() || ETH.connected()) && (!mqtt_client.connected()) )
+    #if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
+      if ( (WiFi.isConnected() || ETH.connected()) && (!mqtt_client.connected()) )
+    #else
+      if ( WiFi.isConnected() && (!mqtt_client.connected()) )
+    #endif
   #endif
     {
       if (mqttReconnects > 0 ) log_message(_F("Lost MQTT connection!"));
@@ -2019,7 +2031,7 @@ void loop() {
     message += getWifiQuality();
     message += F("% (RSSI: ");
     message += WiFi.RSSI();
-#ifdef ESP32
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
     message += F(") ## Ethernet: ");
     if (ETH.phyAddr() != 0) {        
       if (ETH.connected()) {
@@ -2097,7 +2109,7 @@ void loop() {
     mqtt_client.publish(mqtt_topic, stats.c_str(), MQTT_RETAIN_VALUES);
 
     //websocket stats
-#ifdef ESP32
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
     String ethernetStat;
     if (ETH.phyAddr() != 0) {        
       if (ETH.connected()) {
@@ -2118,9 +2130,10 @@ void loop() {
     sprintf_P(log_msg, PSTR("{\"data\": {\"stats\": {\"wifi\": %d, \"ethernet\": \"%s\", \"memory\": %d, \"correct\": %.0f,\"mqtt\": %d,\"rules\": %d,\"uptime\": \"%s\"}}}"), getWifiQuality(), ethernetStat.c_str(), getFreeMemory(), readpercentage, mqttReconnects, nrrules, getuptime);
     free(getuptime);    
 #else
-    char *getuptime = getUptime();
+    /* char *getuptime = getUptime();
     sprintf_P(log_msg, PSTR("{\"data\": {\"stats\": {\"wifi\": %d, \"memory\": %d, \"correct\": %.0f,\"mqtt\": %d,\"rules\": %d,\"uptime\": \"%s\"}}}"), getWifiQuality(), getFreeMemory(), readpercentage, mqttReconnects, nrrules, getuptime);    
-    free(getuptime);    
+    free(getuptime); */
+    String ethernetStat = F("disabled");
 #endif
     
     websocket_write_all(log_msg, strlen(log_msg));        
