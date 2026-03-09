@@ -13,4 +13,6 @@ firmware.map
 firmware.asm
 *.map
 *.elf
-
+.DS_Store
+binaries/.DS_Store
+*.diff
