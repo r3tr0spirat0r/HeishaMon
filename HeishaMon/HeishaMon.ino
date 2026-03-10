@@ -59,6 +59,15 @@ static bool g_ethStarted = false;
 #include "rules.h"
 #include "version.h"
 
+void setupOTA();
+bool send_command(byte* command, int length);
+void popCommandBuffer();
+#ifdef ESP32
+void readProxy();
+#endif
+bool readSerial();
+void log_message(char* string);
+
 DNSServer dnsServer;
 
 //to read bus voltage in stats
@@ -206,7 +215,7 @@ void check_wifi() {
   int wifistatus = WiFi.status();
   if ((wifistatus != WL_CONNECTED) && (WiFi.localIP())) {
     // special case where it seems that we are not connect but we do have working IP (causing the -1% wifi signal), do a reset.
-    log_message(_F("Weird case, WiFi seems disconnected but is not. Resetting WiFi!"));
+    log_message((char*)_F("Weird case, WiFi seems disconnected but is not. Resetting WiFi!"));
     setupWifi(&heishamonSettings);
   } else if ((wifistatus != WL_CONNECTED) || (!WiFi.localIP())) {
     /*
@@ -221,7 +230,7 @@ void check_wifi() {
         also, do not disconnect if wifi network scan is active
     */
     if ((heishamonSettings.wifi_ssid[0] != '\0') && (wifistatus != WL_DISCONNECTED) && (WiFi.scanComplete() != -1) && (WiFi.softAPgetStationNum() > 0)) {
-      log_message(_F("WiFi lost, but softAP station connecting, so stop trying to connect to configured ssid..."));
+      log_message((char*)_F("WiFi lost, but softAP station connecting, so stop trying to connect to configured ssid..."));
       WiFi.disconnect(true);
     }
 
@@ -231,26 +240,26 @@ void check_wifi() {
     if ((heishamonSettings.wifi_ssid[0] != '\0') && ((unsigned long)(millis() - lastWifiRetryTimer) > WIFIRETRYTIMER)) {
       lastWifiRetryTimer = millis();
       if ((WiFi.softAPSSID() == "") && (heishamonSettings.hotspot)) {
-        log_message(_F("WiFi lost, starting setup hotspot..."));
+        log_message((char*)_F("WiFi lost, starting setup hotspot..."));
         WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
         WiFi.softAP(_F("HeishaMon-Setup"));
       }
       if ((wifistatus == WL_DISCONNECTED) && (WiFi.softAPgetStationNum() == 0)) {
-        log_message(_F("Retrying configured WiFi, ..."));
+        log_message((char*)_F("Retrying configured WiFi, ..."));
         if (heishamonSettings.wifi_password[0] == '\0') {
           WiFi.begin(heishamonSettings.wifi_ssid);
         } else {
           WiFi.begin(heishamonSettings.wifi_ssid, heishamonSettings.wifi_password);
         }
       } else {
-        log_message(_F("Reconnecting to WiFi failed. Waiting a few seconds before trying again."));
+        log_message((char*)_F("Reconnecting to WiFi failed. Waiting a few seconds before trying again."));
         WiFi.disconnect(true);
       }
     }
   }
   if (WiFi.localIP()) {  //WiFi connected
     if (WiFi.softAPSSID() != "") {
-      log_message(_F("WiFi (re)connected, shutting down hotspot..."));
+      log_message((char*)_F("WiFi (re)connected, shutting down hotspot..."));
       WiFi.softAPdisconnect(true);
       MDNS.notifyAPChange();
     }
@@ -264,7 +273,7 @@ void check_wifi() {
       experimental::ESP8266WiFiGratuitous::stationKeepAliveSetIntervalMs(5000);  //necessary for some users with bad wifi routers
 
       if (heishamonSettings.wifi_ssid[0] == '\0') {
-        log_message(_F("WiFi connected without SSID and password in settings. Must come from persistent memory. Storing in settings."));
+        log_message((char*)_F("WiFi connected without SSID and password in settings. Must come from persistent memory. Storing in settings."));
         WiFi.SSID().toCharArray(heishamonSettings.wifi_ssid, 40);
         WiFi.psk().toCharArray(heishamonSettings.wifi_password, 40);
         JsonDocument jsonDoc;
@@ -288,7 +297,7 @@ void check_wifi() {
   }
   if (doInitialWifiScan && (millis() > 15000)) {  //do a wifi scan a boot after 15 seconds
     doInitialWifiScan = false;
-    log_message(_F("Starting initial wifi scan ..."));
+    log_message((char*)_F("Starting initial wifi scan ..."));
     WiFi.scanNetworksAsync(getWifiScanResults);
   }
 }
@@ -309,7 +318,7 @@ void check_wifi() {
     if ((WiFi.getMode() & WIFI_MODE_AP) &&
         ((heishamonSettings.wifi_ssid[0] != '\0') || !heishamonSettings.hotspot)) {
 
-      log_message(_F("WiFi or ETH connected, shutting down hotspot"));
+      log_message((char*)_F("WiFi or ETH connected, shutting down hotspot"));
       WiFi.softAPdisconnect(true);
       WiFi.mode(WIFI_STA);
       if (wifistatus != WL_CONNECTED) { //it must be that ETH reconnected, so keep trying WiFi in the background
@@ -332,7 +341,7 @@ void check_wifi() {
       MDNS.addService("http", "tcp", 80);
 
       if (heishamonSettings.wifi_ssid[0] == '\0') {
-        log_message(_F("Storing WiFi credentials from persistent memory"));
+        log_message((char*)_F("Storing WiFi credentials from persistent memory"));
         WiFi.SSID().toCharArray(heishamonSettings.wifi_ssid, 40);
         WiFi.psk().toCharArray(heishamonSettings.wifi_password, 40);
         JsonDocument jsonDoc;
@@ -359,7 +368,7 @@ void check_wifi() {
   // If AP client is connected, STA must back off
   if (WiFi.softAPgetStationNum() > 0) {
     if (WiFi.getMode() != WIFI_AP) {
-      log_message(_F("SoftAP client active, suspending STA reconnect"));
+      log_message((char*)_F("SoftAP client active, suspending STA reconnect"));
 	    WiFi.disconnect(true);
 	    WiFi.mode(WIFI_AP);
     }
@@ -374,7 +383,7 @@ void check_wifi() {
 
   // Ensure AP is running if allowed
   if (heishamonSettings.hotspot && !(WiFi.getMode() & WIFI_MODE_AP)) {
-    log_message(_F("Starting setup hotspot"));
+    log_message((char*)_F("Starting setup hotspot"));
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     WiFi.softAP(_F("HeishaMon-Setup"));
@@ -382,7 +391,7 @@ void check_wifi() {
 
   // Disable STA so next retry is clean and we wait WIFIRETRYTIMER so hotspot can do its thing
   if (WiFi.getMode() != WIFI_AP) {
-    log_message(_F("Disabling WiFi STA for a while..."));	
+    log_message((char*)_F("Disabling WiFi STA for a while..."));	
 	  WiFi.disconnect(true);
     WiFi.mode(WIFI_AP); 
     return;
@@ -392,11 +401,11 @@ void check_wifi() {
   if (heishamonSettings.wifi_ssid[0] != '\0') {
     // Repair STA if it is stopped
     if (!(WiFi.getMode() & WIFI_MODE_STA)) {
-      log_message(_F("STA stopped, re-enabling STA"));
+      log_message((char*)_F("STA stopped, re-enabling STA"));
       WiFi.mode(WIFI_AP_STA);
       delay(50);
     }    
-    log_message(_F("Retrying configured WiFi"));
+    log_message((char*)_F("Retrying configured WiFi"));
     WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
     if (heishamonSettings.wifi_password[0] == '\0') {
       WiFi.begin(heishamonSettings.wifi_ssid);
@@ -410,17 +419,17 @@ void check_wifi() {
 #ifdef TLS_SUPPORT
 bool loadTlsCaFromFS(WiFiClientSecure &client) {
   if (!LittleFS.exists("/ca.pem")) {
-    log_message(_F("[TLS] /ca.pem not found"));
+    log_message((char*)_F("[TLS] /ca.pem not found"));
     return false;
   }
   File certFile = LittleFS.open("/ca.pem", "r");
   if (!certFile) {
-    log_message(_F("[TLS] open(/ca.pem) failed"));
+    log_message((char*)_F("[TLS] open(/ca.pem) failed"));
     return false;
   }
   size_t certSize = certFile.size();
   if (certSize == 0) {
-    log_message(_F("[TLS] /ca.pem is empty"));
+    log_message((char*)_F("[TLS] /ca.pem is empty"));
     certFile.close();
     return false;
   }
@@ -429,7 +438,7 @@ bool loadTlsCaFromFS(WiFiClientSecure &client) {
   persistent_ca_pem[n] = '\0';
   certFile.close();
   client.setCACert(persistent_ca_pem.get());
-  log_message(_F("[TLS] CA loaded into client"));
+  log_message((char*)_F("[TLS] CA loaded into client"));
   return true;
 }
 #endif
@@ -441,9 +450,9 @@ void mqtt_reconnect()
   if ((lastMqttReconnectAttempt == 0) || ((unsigned long)(now - lastMqttReconnectAttempt) > MQTTRECONNECTTIMER)) { //only try reconnect each MQTTRECONNECTTIMER seconds or on boot when lastMqttReconnectAttempt is still 0
     lastMqttReconnectAttempt = now;
     if (mqttReconnects == 0) {
-      log_message(_F("Connecting to mqtt server ..."));
+      log_message((char*)_F("Connecting to mqtt server ..."));
     } else {
-      log_message(_F("Reconnecting to mqtt server ..."));
+      log_message((char*)_F("Reconnecting to mqtt server ..."));
     }
     char topic[256];
     sprintf(topic, "%s/%s", heishamonSettings.mqtt_topic_base, mqtt_willtopic);
@@ -455,16 +464,16 @@ void mqtt_reconnect()
       } else {
         mqtt_wifi_client.stop();
         if (!loadTlsCaFromFS(mqtt_tls_client)) {
-          log_message(_F("[TLS] Proceeding without valid CA (expect failure)"));
+          log_message((char*)_F("[TLS] Proceeding without valid CA (expect failure)"));
         }
       }
       last_tls_enabled = heishamonSettings.mqtt_tls_enabled;
     }
 
     if (new_ca_stored) {
-      log_message(_F("[TLS] Trying to load new CA ertificate"));
+      log_message((char*)_F("[TLS] Trying to load new CA ertificate"));
       if (!loadTlsCaFromFS(mqtt_tls_client)) {
-        log_message(_F("[TLS] Proceeding without valid CA (expect failure)"));
+        log_message((char*)_F("[TLS] Proceeding without valid CA (expect failure)"));
       }
       new_ca_stored = false;
     }
@@ -518,14 +527,14 @@ void mqtt_reconnect()
 //#ifdef TLS_SUPPORT // error state is useful in any case
     else {
       int8_t err = mqtt_client.state();
-      log_message(_F("MQTT connect failed, state:"));
+      log_message((char*)_F("MQTT connect failed, state:"));
       switch (err) {
-        case -1: log_message(_F(" -1 → TLS handshake or network error")); break;
-        case -2: log_message(_F(" -2 → Connection timeout – cannot reach broker or CA/time error")); break;
-        case -3: log_message(_F(" -3 → Server not found or rejected")); break;
-        case -4: log_message(_F(" -4 → Connection lost")); break;
-        case -5: log_message(_F(" -5 → Check username/password")); break;
-        default: log_message(_F("    → Unknown error")); break;
+        case -1: log_message((char*)_F(" -1 → TLS handshake or network error")); break;
+        case -2: log_message((char*)_F(" -2 → Connection timeout – cannot reach broker or CA/time error")); break;
+        case -3: log_message((char*)_F(" -3 → Server not found or rejected")); break;
+        case -4: log_message((char*)_F(" -4 → Connection lost")); break;
+        case -5: log_message((char*)_F(" -5 → Check username/password")); break;
+        default: log_message((char*)_F("    → Unknown error")); break;
       }
     }
 //#endif
@@ -596,16 +605,15 @@ void logHex(char *hex, byte hex_len) {
   }
 }
 
-void mqttPublish(char* topic, char* subtopic, char* value) {
-  mqttPublish(topic, subtopic, value, MQTT_RETAIN_VALUES);
-}
-
 void mqttPublish(char* topic, char* subtopic, char* value, bool retain) {
   char mqtt_topic[256];
   sprintf_P(mqtt_topic, PSTR("%s/%s/%s"), heishamonSettings.mqtt_topic_base, topic, subtopic);
   mqtt_client.publish(mqtt_topic, value, retain);
 }
 
+void mqttPublish(char* topic, char* subtopic, char* value) {
+  mqttPublish(topic, subtopic, value, MQTT_RETAIN_VALUES);
+}
 
 
 byte calcChecksum(byte* command, int length) {
@@ -633,7 +641,7 @@ void readProxy()
     proxydata[proxydata_length + proxylen] = proxySerial.read(); //read available data and place it after the last received data
     proxylen++;
     if ((proxydata[0] != 0x71) and  (proxydata[0] != 0x31) and  (proxydata[0] != 0xF1)) { //wrong header received!
-      log_message(_F("PROXY Received bad header. Ignoring this data!"));
+      log_message((char*)_F("PROXY Received bad header. Ignoring this data!"));
       if (heishamonSettings.logHexdump) logHex(proxydata, proxylen);
       proxydata_length = 0;
       return; //return so this while loop does not loop forever if there happens to be a continous invalid data stream
@@ -645,7 +653,7 @@ void readProxy()
     if ((proxydata_length > ( proxydata[1] + 3)) || (proxydata_length >= MAXDATASIZE)) {
       sprintf_P(log_msg, PSTR("PROXY Received %i bytes proxy %i\n"), proxydata_length, proxydata[1]);
       log_message(log_msg);
-      log_message(_F("PROXY Received more data than header suggests! Ignoring this as this is bad data."));
+      log_message((char*)_F("PROXY Received more data than header suggests! Ignoring this as this is bad data."));
       proxydata_length = 0;
       if (heishamonSettings.logHexdump) logHex(proxydata, proxydata_length);
       return;
@@ -654,41 +662,41 @@ void readProxy()
       sprintf_P(log_msg, PSTR("PROXY Received %i bytes"), proxydata_length); log_message(log_msg);
       if (heishamonSettings.logHexdump) logHex(proxydata, proxydata_length);
       if (! isValidReceiveChecksum(proxydata,proxydata_length) ) {
-        log_message(_F("PROXY Checksum received false!"));
+        log_message((char*)_F("PROXY Checksum received false!"));
         proxydata_length = 0; //for next attempt
         return;
       }      
-      log_message(_F("PROXY Checksum and header received ok!"));
+      log_message((char*)_F("PROXY Checksum and header received ok!"));
       if ((proxydata[0]==0x71 or proxydata[0]==0xF1) and proxydata_length == (PANASONICQUERYSIZE+1)) { //this is a query from cztaw on proxy port
         if (proxydata[0]==0xf1) {  //this is a write query, just pass this message forward as new command
-          log_message(_F("PROXY received write query, copy message forward to heatpump"));
+          log_message((char*)_F("PROXY received write query, copy message forward to heatpump"));
           send_command((byte*)proxydata,proxydata_length-1); //strip CRC, will be calculated again in send_command
           //then just reply with the current settings, for read and write it is the same as the write is only acknowledged in the next read
           //so we just run to the next if statement
         }
         if (proxydata[3] == 0x10) {
-          log_message(_F("PROXY requests basic data"));
+          log_message((char*)_F("PROXY requests basic data"));
           if ((actData[0] == 0x71) && (actData[1] == 0xc8) && (actData[2] == 0x01)) { //don't answer if we don't have data
             proxySerial.write(actData,DATASIZE); //should contain valid checksum also
           }
         } else if (proxydata[3] == 0x21 ) {
-          log_message(_F("PROXY requests extra data"));
+          log_message((char*)_F("PROXY requests extra data"));
           if ((actDataExtra[0] == 0x71) && (actDataExtra[1] == 0xc8) && (actDataExtra[2] == 0x01)) { //don't answer if we don't have data
             proxySerial.write(actDataExtra,DATASIZE); //should contain valid checksum also
           }
         } else {
-          log_message(_F("PROXY has sent unknown query! Forwarding to heatpump!"));
+          log_message((char*)_F("PROXY has sent unknown query! Forwarding to heatpump!"));
           send_command((byte *)proxydata, proxydata_length-1); //strip CRC from end as send_command wil recalculate it
         }
         proxydata_length = 0;
         return;
       } else if (proxydata[0]==0x31) {
-        log_message(_F("PROXY received startup message, forwarding to heatpump!"));
+        log_message((char*)_F("PROXY received startup message, forwarding to heatpump!"));
         send_command((byte *)proxydata, proxydata_length-1); //strip CRC from end as send_command wil recalculate it
         proxydata_length = 0;
         return;
       } else {
-        log_message(_F("PROXY received unknown message, forwarding it to heatpump anyway!"));
+        log_message((char*)_F("PROXY received unknown message, forwarding it to heatpump anyway!"));
         send_command((byte *)proxydata, proxydata_length-1); //strip CRC from end as send_command wil recalculate it
         proxydata_length = 0;
         return;
@@ -713,7 +721,7 @@ bool readSerial()
 
     if (((data[0] != 0x71) && (data[0] != 0x31)) || (data[2] != 0x01))  { //wrong header received!
       if (heishamonSettings.logHexdump) {
-        log_message(_F("Received bad header. Ignoring this data!"));
+        log_message((char*)_F("Received bad header. Ignoring this data!"));
         logHex(data, len);
       }
       badheaderread++;
@@ -722,7 +730,7 @@ bool readSerial()
     }
 
     if ((data_length > (data[1] + 3)) || (data_length >= MAXDATASIZE) ) {
-      log_message(_F("Received more data than header suggests! Ignoring this as this is bad data."));
+      log_message((char*)_F("Received more data than header suggests! Ignoring this as this is bad data."));
       if (heishamonSettings.logHexdump) logHex(data, data_length);
       data_length = 0;
       toolongread++;
@@ -734,19 +742,19 @@ bool readSerial()
       sending = false; //we received an answer after our last command so from now on we can start a new send request again
       if (heishamonSettings.logHexdump) logHex(data, data_length);
       if (! isValidReceiveChecksum(data, data_length) ) {
-        log_message(_F("Checksum received false!"));
+        log_message((char*)_F("Checksum received false!"));
         data_length = 0; //for next attempt
         badcrcread++;
         return false;
       }
-      log_message(_F("Checksum and header received ok!"));
+      log_message((char*)_F("Checksum and header received ok!"));
       goodreads++;
 
       if (data_length == DATASIZE)  {  //receive a full data block
         if  (data[3] == 0x10) { //decode the normal data block
           decode_heatpump_data(data, actData, mqtt_client, log_message, heishamonSettings.mqtt_topic_base, heishamonSettings.updateAllTime);
           if ( (!extraDataBlockAvailable) && ((actData[0] == 0x71) && (actData[0xc7] >= 3)) ) { //do we have valid header and byte 0xc7 is more or equal 3 then assume K&L and more series
-            log_message(_F("Extra data available on this heatpump"));
+            log_message((char*)_F("Extra data available on this heatpump"));
             extraDataBlockAvailable = true; //request for extra data next run
           }
           #ifdef RAWDEBUG
@@ -772,9 +780,9 @@ bool readSerial()
           return true;
         } else {
 #ifdef ESP8266
-          log_message(_F("Received an unknown full size datagram. Can't decode this yet."));
+          log_message((char*)_F("Received an unknown full size datagram. Can't decode this yet."));
 #else 
-          log_message(_F("Received a full size datagram but not for me. Forwarding to proxy port."));
+          log_message((char*)_F("Received a full size datagram but not for me. Forwarding to proxy port."));
           proxySerial.write(data,data_length);
 #endif               
           data_length = 0;
@@ -782,16 +790,16 @@ bool readSerial()
         }
       }
       else if (data_length == OPTDATASIZE ) { //optional pcb acknowledge answer
-        log_message(_F("Received optional PCB ack answer. Decoding this in OPT topics."));
+        log_message((char*)_F("Received optional PCB ack answer. Decoding this in OPT topics."));
         decode_optional_heatpump_data(data, actOptData, mqtt_client, log_message, heishamonSettings.mqtt_topic_base, heishamonSettings.updateAllTime);
         data_length = 0;
         return true;
       }
       else {
 #ifdef ESP8266
-        log_message(_F("Received a shorter datagram. Can't decode this yet."));
+        log_message((char*)_F("Received a shorter datagram. Can't decode this yet."));
 #else
-        log_message(_F("Received a shorter datagram but not for me. Forwarding to proxy port."));
+        log_message((char*)_F("Received a shorter datagram but not for me. Forwarding to proxy port."));
         proxySerial.write(data,data_length);
 #endif           
         data_length = 0;
@@ -813,7 +821,7 @@ void popCommandBuffer() {
 
 void pushCommandBuffer(byte* command, int length) {
   if (cmdnrel + 1 > MAXCOMMANDSINBUFFER) {
-    log_message(_F("Too much commands already in buffer. Ignoring this commands.\n"));
+    log_message((char*)_F("Too much commands already in buffer. Ignoring this commands.\n"));
     return;
   }
   cmdbuffer[cmdend].length = length;
@@ -909,7 +917,7 @@ void serialTXTask(void *pvParameters) {
 }
 bool send_command(byte* command, int length) {
   if ( heishamonSettings.listenonly ) {
-    log_message(_F("Not sending this command. Heishamon in listen only mode!"));
+    log_message((char*)_F("Not sending this command. Heishamon in listen only mode!"));
     return false;
   }
   struct cmdbuffer_t cmd;
@@ -923,11 +931,11 @@ bool send_command(byte* command, int length) {
 
 bool send_command(byte* command, int length) {
   if ( heishamonSettings.listenonly ) {
-    log_message(_F("Not sending this command. Heishamon in listen only mode!"));
+    log_message((char*)_F("Not sending this command. Heishamon in listen only mode!"));
     return false;
   }
   if ( sending ) {
-    log_message(_F("Already sending data. Buffering this send request"));
+    log_message((char*)_F("Already sending data. Buffering this send request"));
     pushCommandBuffer(command, length);
     return false;
   }
@@ -948,7 +956,7 @@ bool send_command(byte* command, int length) {
 // Callback function that is called when a message has been pushed to one of your topics.
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   if (mqttcallbackinprogress) {
-    log_message(_F("Already processing another mqtt callback. Ignoring this one"));
+    log_message((char*)_F("Already processing another mqtt callback. Ignoring this one"));
   }
   else {
     mqttcallbackinprogress = true; //simple semaphore to make sure we don't have two callbacks at the same time
@@ -978,7 +986,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
       char mqtt_topic[256];
       sprintf(mqtt_topic, "%s", topic);
       if (mqtt_client.unsubscribe(mqtt_topic)) {
-        log_message(_F("Unsubscribed from S0 watthour restore topic"));
+        log_message((char*)_F("Unsubscribed from S0 watthour restore topic"));
       }
     } else if (strncmp(topic_command, mqtt_topic_commands, strlen(mqtt_topic_commands)) == 0)  // check for commands to heishamon
     {
@@ -1047,18 +1055,18 @@ int8_t webserver_cb(struct webserver_t *client, void *dat) {
           client->route = 30;
         } else if (strcmp_P((char *)dat, PSTR("/debug")) == 0) {
           client->route = 40;
-          log_message(_F("Debug URL requested"));
+          log_message((char*)_F("Debug URL requested"));
         } else if (strcmp_P((char *)dat, PSTR("/wifiscan")) == 0) {
           client->route = 50;
         } else if (strcmp((char *)dat, "/dallasalias") == 0) {
           client->route = 60;
         } else if (strcmp((char *)dat, "/togglelog") == 0) {
           client->route = 1;
-          log_message(_F("Toggled mqtt log flag"));
+          log_message((char*)_F("Toggled mqtt log flag"));
           heishamonSettings.logMqtt ^= true;
         } else if (strcmp_P((char *)dat, PSTR("/togglehexdump")) == 0) {
           client->route = 1;
-          log_message(_F("Toggled hexdump log flag"));
+          log_message((char*)_F("Toggled hexdump log flag"));
           heishamonSettings.logHexdump ^= true;
         } else if (strcmp_P((char *)dat, PSTR("/hotspot-detect.html")) == 0 ||
                    strcmp_P((char *)dat, PSTR("/fwlink")) == 0 ||
@@ -1206,7 +1214,7 @@ int8_t webserver_cb(struct webserver_t *client, void *dat) {
                   sprintf_P(log_msg, PSTR("Firmware MD5 expected: %s"), md5);
                   log_message(log_msg);
                   if (!Update.setMD5(md5)) {
-                    log_message(_F("Failed to set expected update file MD5!"));
+                    log_message((char*)_F("Failed to set expected update file MD5!"));
                     Update.end(false);
                   }
                 } else if (strcmp((char *)args->name, "firmware") == 0) {
@@ -1577,7 +1585,7 @@ void switchSerial() {
   //try to detect if cz-taw1 is connected in parallel
   if (!heishamonSettings.listenonly) {
     if (heatpumpSerial.available() > 0) {
-      log_message(_F("There is data on the line without asking for it. Switching to listen only mode."));
+      log_message((char*)_F("There is data on the line without asking for it. Switching to listen only mode."));
       heishamonSettings.listenonly = true;
     }
     else {
@@ -1594,7 +1602,7 @@ void setupMqtt() {
   mqtt_client.setSocketTimeout(8); mqtt_client.setKeepAlive(30); //fast timeout, any slower than 10s will block the main loop too long (8s might be even safer to avoid reboots on bad wifi); short keepalive may lead to problems with TLS
   if (heishamonSettings.mqtt_tls_enabled) {
     if (!loadTlsCaFromFS(mqtt_tls_client)) {
-      log_message(_F("[TLS] Proceeding without valid CA (expect failure)"));
+      log_message((char*)_F("[TLS] Proceeding without valid CA (expect failure)"));
     }
     mqtt_client.setClient(mqtt_tls_client);
   } else {
@@ -1631,10 +1639,10 @@ void setupConditionals() {
   //load optional PCB data from flash
   if (heishamonSettings.optionalPCB) {
     if (loadOptionalPCB(optionalPCBQuery, OPTIONALPCBQUERYSIZE)) {
-      log_message(_F("Succesfully loaded optional PCB data from saved flash!"));
+      log_message((char*)_F("Succesfully loaded optional PCB data from saved flash!"));
     }
     else {
-      log_message(_F("Failed to load optional PCB data from flash!"));
+      log_message((char*)_F("Failed to load optional PCB data from flash!"));
     }
 #ifdef ESP32
     //insert on task queue
@@ -1681,7 +1689,7 @@ void timer_cb(int nr) {
             LittleFS.remove("/rules.new");
             rules_deinitialize();
           } else if (ret == -1) {
-            log_message(_F("Failed to load new rules, reverting back to older rules!"));
+            log_message((char*)_F("Failed to load new rules, reverting back to older rules!"));
             rules_parse((char*)"/rules.txt");
           } else {
             if (LittleFS.begin()) {
@@ -1874,17 +1882,17 @@ void setup() {
 }
 
 void send_initial_query() {
-  log_message(_F("Requesting initial start query"));
+  log_message((char*)_F("Requesting initial start query"));
   send_command(initialQuery, INITIALQUERYSIZE);
 
 }
 
 void send_panasonic_query() {
-  log_message(_F("Requesting new panasonic data"));
+  log_message((char*)_F("Requesting new panasonic data"));
   send_command(panasonicQuery, PANASONICQUERYSIZE);
   // rest is for the new data block on new models
   if (extraDataBlockAvailable) {
-    log_message(_F("Requesting new panasonic extra data"));
+    log_message((char*)_F("Requesting new panasonic extra data"));
     panasonicQuery[3] = 0x21; //setting 4th byte to 0x21 is a request for extra block
     send_command(panasonicQuery, PANASONICQUERYSIZE);
     panasonicQuery[3] = 0x10; //setting 4th back to 0x10 for normal data request next time
@@ -1893,14 +1901,14 @@ void send_panasonic_query() {
 
 #ifdef ESP8266
 void send_optionalpcb_query() {
-  log_message(_F("Sending optional PCB data"));
+  log_message((char*)_F("Sending optional PCB data"));
   send_command(optionalPCBQuery, OPTIONALPCBQUERYSIZE);
 }
 #endif
 
 void readHeatpump() {
   if (sending && ((unsigned long)(millis() - sendCommandReadTime) > SERIALTIMEOUT)) {
-    log_message(_F("Previous read data attempt failed due to timeout!"));
+    log_message((char*)_F("Previous read data attempt failed due to timeout!"));
     sprintf_P(log_msg, PSTR("Received %d bytes data"), data_length);
     log_message(log_msg);
     if (heishamonSettings.logHexdump) logHex(data, data_length);
@@ -1959,7 +1967,7 @@ void loop() {
 
 #ifdef ESP8266
   if ((!sending) && (cmdnrel > 0)) { //check if there is a send command in the buffer
-    log_message(_F("Sending command from buffer"));
+    log_message((char*)_F("Sending command from buffer"));
     popCommandBuffer();
   }
 #endif
@@ -1998,7 +2006,7 @@ void loop() {
     #endif
   #endif
     {
-      if (mqttReconnects > 0 ) log_message(_F("Lost MQTT connection!"));
+      if (mqttReconnects > 0 ) log_message((char*)_F("Lost MQTT connection!"));
       if (strlen(heishamonSettings.mqtt_server) > 0) mqtt_reconnect();
     }
 
