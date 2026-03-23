@@ -14,5 +14,5 @@ firmware.asm
 *.map
 *.elf
 .DS_Store
-binaries/.DS_Store
+**/ .DS_Store
 *.diff
