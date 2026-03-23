@@ -1573,7 +1573,7 @@ void switchSerial() {
   heatpumpSerial.flush();
   proxySerial.flush();
   proxySerial.end();
-  proxySerial.begin(9600, SERIAL_8E1,PROXYRX,PROXYTX);
+  //proxySerial.begin(9600, SERIAL_8E1,PROXYRX,PROXYTX);
   proxySerial.flush();  
 #endif
 
