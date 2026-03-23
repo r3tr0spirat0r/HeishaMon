@@ -1794,7 +1794,7 @@ void setup() {
   pinMode(BOOTPIN,INPUT_PULLUP); //enable the boot switch to be used as an input after booting
 
   loggingSerial.println(F("Send current wifi info to serial..."));
-  WiFi.printDiag(loggingSerial);
+  //WiFi.printDiag(loggingSerial);
 
   loggingSerial.println(F("Loading config from flash..."));
   loadSettings(&heishamonSettings);
@@ -1823,7 +1823,7 @@ void setup() {
   switchSerial(); //switch serial to gpio13/gpio15
 
   loggingSerial.println(F("Sending new wifi diag..."));
-  WiFi.printDiag(loggingSerial);
+  //WiFi.printDiag(loggingSerial);
 
   loggingSerial.println(F("Settings conditionals..."));
   setupConditionals(); //setup for routines based on settings
