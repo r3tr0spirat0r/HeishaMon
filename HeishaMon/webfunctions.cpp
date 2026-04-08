@@ -608,6 +608,10 @@ int saveSettings(struct webserver_t *client, settingsStruct *heishamonSettings) 
 #ifdef ESP32  
   jsonDoc[F("proxy")] = String("disabled");
 #endif  
+#ifdef TLS_SUPPORT
+  jsonDoc[F("mqtt_tls_enabled")] = String("disabled");
+#endif
+
   jsonDoc[F("use_1wire")] = String("disabled");
   jsonDoc[F("use_s0")] = String("disabled");
 
@@ -994,8 +998,6 @@ int handleRoot(struct webserver_t *client, float readpercentage, int mqttReconne
         webserver_send_content_P(client, webBodyRoot1, strlen_P(webBodyRoot1));
       } break;
     case 1: {
-        webserver_send_content_P(client, heishamon_version, strlen_P(heishamon_version));
-        webserver_send_content_P(client, webBodyRoot2, strlen_P(webBodyRoot2));
         webserver_send_content_P(client, webTabnavOpen, strlen_P(webTabnavOpen));
         if (heishamonSettings->use_1wire) {
           webserver_send_content_P(client, webBodyRootDallasTab, strlen_P(webBodyRootDallasTab));
