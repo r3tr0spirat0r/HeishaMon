@@ -1,11 +1,11 @@
-﻿################################################################################
+################################################################################
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
 
 .vs
-.pio
+.pio/
 pio
-.vscode
+.vscode/
 .pioenvs
 .cache
 build_output
@@ -13,5 +13,8 @@ firmware.map
 firmware.asm
 *.map
 *.elf
+*.log
+compile_commands.json
+.DS_Store
 
 binaries/prepare_release.bat
