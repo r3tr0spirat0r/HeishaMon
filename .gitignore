@@ -1,4 +1,4 @@
-﻿################################################################################
+################################################################################
 # This .gitignore file was automatically created by Microsoft(R) Visual Studio.
 ################################################################################
 
@@ -13,5 +13,9 @@ firmware.map
 firmware.asm
 *.map
 *.elf
+*.log
+compile_commands.json
+.DS_Store
+__pycache__/
 
 binaries/prepare_release.bat
