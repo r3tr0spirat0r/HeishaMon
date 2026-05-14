@@ -15,6 +15,10 @@
 
 #define UPTIME_OVERFLOW 4294967295 // Uptime overflow value
 
+#if defined(ESP32) && !defined(HEISHAMON_NO_ETH)
+bool g_ethStarted = false;
+#endif
+
 static uint8_t ntpservers = 0;
 
 void log_message(char* string);
